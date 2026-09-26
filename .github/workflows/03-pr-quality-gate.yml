@@ -6,7 +6,7 @@ on:
 
 jobs:
   quality-gate:
-    # Skip Dependabot PRs: they follow their own convention
+    # Skip Dependabot PRs, they follow their own convention
     if: github.actor != 'dependabot[bot]'
     runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
     permissions:

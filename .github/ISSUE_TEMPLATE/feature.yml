@@ -10,7 +10,7 @@ body:
     id: summary
     attributes:
       label: Summary
-      description: One sentence: what and why
+      description: One sentence on what and why
     validations:
       required: true
 
@@ -42,7 +42,7 @@ body:
     attributes:
       label: Documentation
       description: |
-        REQUIRED: paste the doc link above OR describe what needs documenting.
+        REQUIRED. Paste the doc link above OR describe what needs documenting.
         If no docs needed, post a comment: /bypass-docs: <reason>
       placeholder: "What documentation needs to be created or updated?"
     validations:

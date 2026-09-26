@@ -86,7 +86,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Skip
         if: steps.check.outputs.tf_count == '0'
-        run: echo "No .tf files found: tfsec skipped."
+        run: echo "No .tf files found, tfsec skipped."
 
   hadolint:
     name: Dockerfile Lint
@@ -106,4 +106,4 @@ jobs:
           failure-threshold: warning
       - name: Skip
         if: steps.check.outputs.count == '0'
-        run: echo "No Dockerfiles found: hadolint skipped."
+        run: echo "No Dockerfiles found, hadolint skipped."
