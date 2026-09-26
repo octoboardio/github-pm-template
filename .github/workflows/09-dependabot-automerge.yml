@@ -40,7 +40,7 @@ jobs:
       - name: Flag major updates for human review
         if: steps.meta.outputs.update-type == 'version-update:semver-major'
         run: |
-          gh pr comment "$PR_URL" --body "> ⚠️ **Major version update** — requires manual review before merging.
+          gh pr comment "$PR_URL" --body "> ⚠️ **Major version update**: requires manual review before merging.
           >
           > **Updated:** \`${{ steps.meta.outputs.dependency-names }}\`
           > **From:** v\`${{ steps.meta.outputs.previous-version }}\` → v\`${{ steps.meta.outputs.new-version }}\`

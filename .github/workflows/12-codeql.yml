@@ -1,7 +1,7 @@
 name: 🔐 CodeQL Security Scan
 
 # CodeQL supports: Go, Python, JavaScript/TypeScript (common in DevOps tooling)
-# For IaC security (.tf, .hcl, Dockerfile, YAML) — see 14-iac-scan.yml
+# For IaC security (.tf, .hcl, Dockerfile, YAML): see 14-iac-scan.yml
 
 on:
   push:

@@ -6,7 +6,7 @@ on:
 
 jobs:
   quality-gate:
-    # Skip Dependabot PRs — they follow their own convention
+    # Skip Dependabot PRs: they follow their own convention
     if: github.actor != 'dependabot[bot]'
     runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
     permissions:
@@ -41,13 +41,13 @@ jobs:
 
             // 3. PR body must have a Summary section
             if (!body.includes('## Summary') && !body.includes('## What')) {
-              warnings.push('⚠️ **Missing Summary** — add a `## Summary` section describing what this PR does');
+              warnings.push('⚠️ **Missing Summary**: add a `## Summary` section describing what this PR does');
             }
 
             // 4. Warn on large PRs (> 500 lines)
             const changes = (pr.additions || 0) + (pr.deletions || 0);
             if (changes > 500) {
-              warnings.push(`⚠️ **Large PR** (${changes} lines changed) — consider breaking it into smaller PRs`);
+              warnings.push(`⚠️ **Large PR** (${changes} lines changed): consider breaking it into smaller PRs`);
             }
 
             // 5. Branch naming convention: `feat/42-short-slug`.
@@ -67,7 +67,7 @@ jobs:
                 ...sections,
                 '',
                 errors.length === 0
-                  ? '> ✅ No blocking errors — good to review!'
+                  ? '> ✅ No blocking errors: good to review!'
                   : '> ⛔ Fix the errors above before requesting review.',
               ].join('\n');
 

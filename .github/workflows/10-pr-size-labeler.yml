@@ -47,7 +47,7 @@ jobs:
               await github.rest.issues.createComment({
                 owner: context.repo.owner, repo: context.repo.repo,
                 issue_number: pr.number,
-                body: `> 📏 **XL PR detected** — ${changes} lines changed.\n> Consider splitting into smaller PRs to speed up review.`,
+                body: `> 📏 **XL PR detected**: ${changes} lines changed.\n> Consider splitting into smaller PRs to speed up review.`,
               });
             }
 

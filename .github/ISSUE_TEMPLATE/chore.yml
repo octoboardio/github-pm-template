@@ -14,7 +14,7 @@ body:
     id: why
     attributes:
       label: Why
-      description: Why now — tech debt, security, performance
+      description: Why now: tech debt, security, performance
     validations:
       required: true
 

@@ -37,7 +37,7 @@ jobs:
                 repo: context.repo.repo,
                 issue_number: issue.number,
                 body: [
-                  `> 🚧 **Blocked Reminder** — this issue has been blocked for **${daysSince} days**`,
+                  `> 🚧 **Blocked Reminder**: this issue has been blocked for **${daysSince} days**`,
                   `>`,
                   `> **Assignee(s):** ${assignees}`,
                   `>`,

@@ -60,14 +60,14 @@ function render(m, repo) {
   for (const [status, list] of Object.entries(m.waiting)) {
     out.push(`### ${status} (${list.length})`);
     out.push(list.length
-      ? list.map((i) => `- ${link(i)} — **${i.days === null ? 'unknown' : plural(i.days, 'day', 'days')}**${who(i)}`).join('\n')
+      ? list.map((i) => `- ${link(i)}: **${i.days === null ? 'unknown' : plural(i.days, 'day', 'days')}**${who(i)}`).join('\n')
       : '_nothing waiting_');
     out.push('');
   }
 
   out.push(`### Not moving, open work untouched for ${plural(m.ageingDays, 'day', 'days')} or more (${m.ageing.length})`);
   out.push(m.ageing.length
-    ? m.ageing.map((i) => `- ${link(i)} — ${i.status}, ${plural(i.days, 'day', 'days')}${who(i)}`).join('\n')
+    ? m.ageing.map((i) => `- ${link(i)}: ${i.status}, ${plural(i.days, 'day', 'days')}${who(i)}`).join('\n')
     : '_everything active has moved recently_');
   out.push('');
 
@@ -80,7 +80,7 @@ function render(m, repo) {
 
   if (m.cycle.slowest.length) {
     out.push('### Slowest to deliver this week');
-    out.push(m.cycle.slowest.map((i) => `- ${link(i)} — ${plural(i.cycle, 'day', 'days')}`).join('\n'));
+    out.push(m.cycle.slowest.map((i) => `- ${link(i)}: ${plural(i.cycle, 'day', 'days')}`).join('\n'));
     out.push('');
   }
   if (m.cycle.unmeasured) {
