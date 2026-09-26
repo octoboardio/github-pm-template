@@ -1,0 +1,48 @@
+name: 📊 Sync Project Board
+
+# A board is org configuration, not a file, so a repository created from this
+# template starts with no board at all, or with GitHub's defaults: no
+# Client Awaiting column, the built-in Priority field that the API cannot write,
+# and a single unnamed view. Nothing brought it up to the house standard.
+#
+# This provisions and aligns it from .github/board-standard.json, which the
+# template owns and syncs. It is the board-shaped twin of 29-sync-labels.
+# The work is in .github/scripts/sync-board.js.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - .github/board-standard.json
+      - .github/scripts/sync-board.js
+      - .github/scripts/board-plan.js
+      - .github/workflows/30-sync-board.yml
+  schedule:
+    # Weekly backstop, so a board edited by hand drifts back into line.
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sync-board:
+    # A template repository is a starting point, not a project. It must not
+    # provision a board of its own; the boards it creates belong to the
+    # repositories made from it. A repository that deliberately has no board
+    # (a demo, a sandbox) opts out with the PM_BOARD=off variable, otherwise
+    # this would treat that decision as drift and recreate the board weekly.
+    if: ${{ !github.event.repository.is_template && vars.PM_BOARD != 'off' }}
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Provision and align the board
+        uses: actions/github-script@v9
+        with:
+          # GITHUB_TOKEN cannot read or write organization projects. Without
+          # PROJECT_TOKEN this logs and exits rather than failing the run.
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const sync = require('./.github/scripts/sync-board.js');
+            await sync({ github, context, core });

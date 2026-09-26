@@ -1,0 +1,54 @@
+name: 📏 PR Size Labeler
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  label-size:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const changes = pr.additions + pr.deletions;
+
+            const sizes = [
+              { label: 'size: XS', max: 10   },
+              { label: 'size: S',  max: 50   },
+              { label: 'size: M',  max: 200  },
+              { label: 'size: L',  max: 500  },
+              { label: 'size: XL', max: Infinity },
+            ];
+
+            const matched = sizes.find(s => changes <= s.max);
+
+            // Remove all existing size labels
+            const allSizeLabels = sizes.map(s => s.label);
+            const current = pr.labels.map(l => l.name);
+            for (const lbl of current.filter(l => allSizeLabels.includes(l))) {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pr.number, name: lbl,
+              }).catch(() => {});
+            }
+
+            // Apply correct size label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: pr.number, labels: [matched.label],
+            });
+
+            // Warn on XL
+            if (matched.label === 'size: XL') {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: pr.number,
+                body: `> 📏 **XL PR detected** — ${changes} lines changed.\n> Consider splitting into smaller PRs to speed up review.`,
+              });
+            }
+
+            core.info(`PR size: ${matched.label} (${changes} lines)`);

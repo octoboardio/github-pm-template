@@ -1,0 +1,52 @@
+name: 🎯 Auto Milestone Assignment
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  assign-milestone:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const label = context.payload.label.name;
+
+            // Skip if milestone already set
+            if (issue.milestone) return;
+
+            // Get milestones
+            const { data: milestones } = await github.rest.issues.listMilestones({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              state: 'open',
+            });
+
+            const find = (name) => milestones.find(m => m.title.includes(name));
+
+            // Map label patterns to milestones
+            let target = null;
+            if (label.includes('P0') || label.includes('P1')) {
+              // Critical/High priority → earliest open milestone
+              target = milestones.sort((a, b) => new Date(a.due_on) - new Date(b.due_on))[0];
+            } else if (issue.labels.some(l => l.name === 'type: bug')) {
+              target = find('v1.0') || milestones[0];
+            } else if (issue.labels.some(l => l.name === 'type: feature')) {
+              target = find('v1.1') || find('v1.2') || milestones[1];
+            } else if (issue.labels.some(l => l.name === 'type: chore')) {
+              target = milestones[milestones.length - 1]; // Last milestone
+            }
+
+            if (target) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo:  context.repo.repo,
+                issue_number: issue.number,
+                milestone: target.number,
+              });
+              core.info(`Assigned #${issue.number} → ${target.title}`);
+            }

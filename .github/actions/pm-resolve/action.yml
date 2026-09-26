@@ -1,0 +1,134 @@
+name: PM Resolve
+description: Resolve a ProjectV2 board, its fields and single-select option ids by name.
+
+inputs:
+  token:
+    description: Token with project scope. GITHUB_TOKEN cannot read organization projects.
+    required: true
+  project-title:
+    description: Board title to find. Defaults to the repository name.
+    required: false
+    default: ''
+
+outputs:
+  found:
+    description: The string "true" when a matching board was found, otherwise "false".
+    value: ${{ steps.resolve.outputs.found }}
+  project-id:
+    description: ProjectV2 node id, empty when not found.
+    value: ${{ steps.resolve.outputs.project-id }}
+  status-field-id:
+    description: Field id of the Status field, empty when absent.
+    value: ${{ steps.resolve.outputs.status-field-id }}
+  size-field-id:
+    description: Field id of the Size field, empty when absent.
+    value: ${{ steps.resolve.outputs.size-field-id }}
+  priority-field-id:
+    description: Field id of the Priority field, empty when absent.
+    value: ${{ steps.resolve.outputs.priority-field-id }}
+  status-options:
+    description: JSON object mapping canonical status name to option id.
+    value: ${{ steps.resolve.outputs.status-options }}
+  unmapped-statuses:
+    description: Comma separated Status option names that did not canonicalize.
+    value: ${{ steps.resolve.outputs.unmapped-statuses }}
+
+runs:
+  using: composite
+  steps:
+    - id: resolve
+      uses: actions/github-script@v9
+      env:
+        PROJECT_TITLE: ${{ inputs.project-title }}
+      with:
+        github-token: ${{ inputs.token }}
+        script: |
+          // The vocabulary lives in .github/board-standard.json. This action
+          // used to keep its own copy, which never learned about the column
+          // that means the client owes us something, so every option there
+          // came back unmapped and nothing could move an item into it.
+          const { canonical } = require('./.github/scripts/board-vocab.js');
+
+          const title = process.env.PROJECT_TITLE || context.repo.repo;
+
+          const empty = () => {
+            core.setOutput('found', 'false');
+            core.setOutput('project-id', '');
+            core.setOutput('status-field-id', '');
+            core.setOutput('size-field-id', '');
+            core.setOutput('priority-field-id', '');
+            core.setOutput('status-options', '{}');
+            core.setOutput('unmapped-statuses', '');
+          };
+
+          const PROJECTS = `
+            query($login: String!, $after: String) {
+              organization(login: $login) {
+                projectsV2(first: 100, after: $after) {
+                  pageInfo { hasNextPage endCursor }
+                  nodes { id title }
+                }
+              }
+            }`;
+
+          const FIELDS = `
+            query($projectId: ID!) {
+              node(id: $projectId) {
+                ... on ProjectV2 {
+                  fields(first: 50) {
+                    nodes {
+                      ... on ProjectV2FieldCommon { id name }
+                      ... on ProjectV2SingleSelectField { id name options { id name } }
+                    }
+                  }
+                }
+              }
+            }`;
+
+          let project = null;
+          let after = null;
+          try {
+            do {
+              const page = await github.graphql(PROJECTS, { login: context.repo.owner, after });
+              const conn = page.organization.projectsV2;
+              project = conn.nodes.find((p) => p.title === title) ?? null;
+              after = conn.pageInfo.hasNextPage ? conn.pageInfo.endCursor : null;
+            } while (!project && after);
+          } catch (e) {
+            core.info(`pm-resolve: cannot read organization projects (${e.message}). Skipping board updates.`);
+            return empty();
+          }
+
+          if (!project) {
+            core.info(`pm-resolve: no board titled "${title}". Skipping board updates.`);
+            return empty();
+          }
+
+          const res = await github.graphql(FIELDS, { projectId: project.id });
+          const fields = new Map();
+          for (const f of res.node.fields.nodes) {
+            if (f && f.name) fields.set(f.name, f);
+          }
+
+          const status = fields.get('Status');
+          const options = {};
+          const unmapped = [];
+          if (status && status.options) {
+            for (const o of status.options) {
+              const c = canonical(o.name);
+              if (c) { if (!options[c]) options[c] = o.id; }
+              else unmapped.push(o.name);
+            }
+          }
+          if (unmapped.length) {
+            core.info(`pm-resolve: unmapped Status options: ${unmapped.join(', ')}`);
+          }
+
+          core.setOutput('found', 'true');
+          core.setOutput('project-id', project.id);
+          core.setOutput('status-field-id', status ? status.id : '');
+          core.setOutput('size-field-id', fields.get('Size') ? fields.get('Size').id : '');
+          core.setOutput('priority-field-id', fields.get('Priority') ? fields.get('Priority').id : '');
+          core.setOutput('status-options', JSON.stringify(options));
+          core.setOutput('unmapped-statuses', unmapped.join(', '));
+          core.info(`pm-resolve: board "${title}" (${project.id}), statuses: ${Object.keys(options).join(', ') || 'none'}`);

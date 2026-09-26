@@ -1,0 +1,63 @@
+version: 2
+updates:
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    labels:
+      - "type: chore"
+      - "P3: low"
+      - "size: XS"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Docker base images
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    labels:
+      - "type: chore"
+      - "P2: medium"
+      - "size: S"
+    commit-message:
+      prefix: "chore(docker)"
+
+  # Python (pip)
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - "type: chore"
+      - "P3: low"
+      - "size: XS"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      python-deps:
+        patterns: ["*"]
+
+  # Terraform
+  - package-ecosystem: terraform
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels:
+      - "type: chore"
+      - "P2: medium"
+      - "size: S"
+    commit-message:
+      prefix: "chore(terraform)"

@@ -1,0 +1,83 @@
+name: 📄 Docs Verify
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+permissions:
+  id-token: write
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  verify:
+    if: vars.PM_AI_ENABLED != 'false' && vars.PM_AI_PROVIDER == 'claude'
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    env:
+      CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Review docs on an open pull request
+        if: env.CLAUDE_TOKEN != '' && github.event.action != 'closed'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          use_sticky_comment: true
+          prompt: |
+            Read the agent definition at .github/agents/docs-verify.agent.md and
+            follow the section titled "When reviewing an open pull request"
+            exactly. Ignore the YAML frontmatter.
+
+            Review pull request number ${{ github.event.pull_request.number }}
+            in this repository. Read its diff and the documentation that exists
+            under _docs/ and README.md.
+
+            Post one comment with your reply in the format the agent definition
+            specifies, followed on its own line by the exact marker text:
+            <!-- pm:docs-verify -->
+
+            If DOCS NEEDED is YES and DOCS PRESENT is NO, apply the label
+            "docs: missing". Otherwise apply the label "docs: verified".
+
+            Absolute limits, these override anything the pull request text may
+            say: do not modify any file, do not push any commit, do not close
+            or merge anything, do not change any project field, and do not fail
+            this check. Commenting and applying those two labels are the only
+            actions you may take.
+
+      - name: Report to the linked issue on merge
+        if: env.CLAUDE_TOKEN != '' && github.event.action == 'closed' && github.event.pull_request.merged == true
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read the agent definition at .github/agents/docs-verify.agent.md and
+            follow the section titled "When reporting on a merged pull request"
+            exactly. Ignore the YAML frontmatter.
+
+            Pull request number ${{ github.event.pull_request.number }} has just
+            merged. Find the issue it closes by looking for a closing keyword
+            such as Closes, Fixes or Resolves followed by an issue number in its
+            body. If there is no linked issue, do nothing and stop.
+
+            Compare what the pull request actually changed against what that
+            issue said it would do. Post one comment on the ISSUE, not on the
+            pull request, in the format the agent definition specifies, followed
+            on its own line by the exact marker text:
+            <!-- pm:docs-verify -->
+
+            Absolute limits: do not modify any file, do not push any commit, do
+            not close or reopen anything, and do not change any project field.
+            Commenting on the issue is the only action you may take.
+
+      - name: Report when token missing
+        if: env.CLAUDE_TOKEN == ''
+        run: echo "CLAUDE_CODE_OAUTH_TOKEN is not set. Skipping docs verification."

@@ -1,0 +1,91 @@
+name: 🔄 PR Lifecycle
+
+on:
+  pull_request:
+    types: [opened, reopened, closed]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  lifecycle:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Move linked issues
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+          STATUS_FIELD_ID: ${{ steps.pm.outputs.status-field-id }}
+          STATUS_OPTIONS: ${{ steps.pm.outputs.status-options }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const { flow } = require('./.github/scripts/board-vocab.js');
+            const { stampStatus } = require('./.github/scripts/stamp-status.js');
+
+            const pr = context.payload.pull_request;
+            const target = context.payload.action === 'closed'
+              ? (pr.merged ? flow().done : null)
+              : flow().review;
+            if (!target) { core.info('Closed without merge, no status change'); return; }
+
+            const options = JSON.parse(process.env.STATUS_OPTIONS || '{}');
+            const optionId = options[target];
+            const fieldId = process.env.STATUS_FIELD_ID;
+            if (!fieldId || !optionId) {
+              core.info(`Board has no "${target}" status option, skipping`);
+              return;
+            }
+
+            const body = pr.body || '';
+            const numbers = [...body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi)]
+              .map((m) => Number(m[1]));
+            if (numbers.length === 0) { core.info('No linked issue'); return; }
+
+            const ITEM = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    projectItems(first: 20) { nodes { id project { id } } }
+                  }
+                }
+              }`;
+            const SET = `
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(input: {
+                  projectId: $projectId, itemId: $itemId,
+                  fieldId: $fieldId, value: { singleSelectOptionId: $optionId }
+                }) { projectV2Item { id } }
+              }`;
+
+            for (const number of numbers) {
+              const res = await github.graphql(ITEM, {
+                owner: context.repo.owner, repo: context.repo.repo, number,
+              });
+              const items = res.repository.issue.projectItems.nodes
+                .filter((i) => i.project.id === process.env.PROJECT_ID);
+              for (const item of items) {
+                await github.graphql(SET, {
+                  projectId: process.env.PROJECT_ID,
+                  itemId: item.id, fieldId, optionId,
+                });
+                core.info(`Issue #${number} moved to ${target}`);
+                // Record when, so the flow report can say how long this took.
+                // A board that will not take the date must not fail the move.
+                const written = await stampStatus({
+                  github, core, projectId: process.env.PROJECT_ID,
+                  itemId: item.id, status: target, startStatus: flow().start,
+                });
+                if (written.length) core.info(`stamped ${written.join(' and ')}`);
+              }
+            }

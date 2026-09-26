@@ -1,0 +1,194 @@
+name: 🤖 AI Size Assist
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+jobs:
+  assist:
+    if: vars.PM_AI_ENABLED != 'false' && vars.PM_AI_PROVIDER != 'claude'
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - id: gate
+        name: Decide whether advice is needed
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const MARKER = '<!-- pm:ai-size-advice -->';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+
+            core.setOutput('should_run', 'false');
+
+            const comments = await github.rest.issues.listComments({
+              owner, repo, issue_number: issue.number, per_page: 100,
+            });
+            if (comments.data.some((c) => (c.body || '').includes(MARKER))) {
+              core.info('Advice already posted, skipping');
+              return;
+            }
+
+            const q = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    projectItems(first: 20) {
+                      nodes {
+                        id
+                        project { id }
+                        size: fieldValueByName(name: "Size") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+            const res = await github.graphql(q, { owner, repo, number: issue.number });
+            const item = res.repository.issue.projectItems.nodes
+              .find((i) => i.project.id === process.env.PROJECT_ID);
+            if (item && item.size && item.size.name) {
+              core.info(`Size already set to ${item.size.name}, no advice needed`);
+              return;
+            }
+
+            const title = issue.title || '';
+            const body = (issue.body || '').slice(0, 1500);
+            fs.writeFileSync('/tmp/pm-prompt.txt',
+              `Issue title: ${title}\n\nIssue body:\n${body}\n`);
+
+            const agentPath = '.github/agents/size-assist.agent.md';
+            let agent = fs.readFileSync(agentPath, 'utf8');
+            const fm = agent.match(/^---\n[\s\S]*?\n---\n/);
+            if (fm) agent = agent.slice(fm[0].length);
+            fs.writeFileSync('/tmp/pm-system.md', agent.trim() + '\n');
+            core.info(`Loaded agent from ${agentPath}`);
+            core.setOutput('item_id', item ? item.id : '');
+            core.setOutput('should_run', 'true');
+
+      - id: ai
+        name: Ask the model
+        if: steps.gate.outputs.should_run == 'true'
+        uses: actions/ai-inference@v3
+        continue-on-error: true
+        with:
+          endpoint: ${{ secrets.OPENROUTER_API_KEY != '' && 'https://openrouter.ai/api/v1' || 'https://models.github.ai/inference' }}
+          token: ${{ secrets.OPENROUTER_API_KEY != '' && secrets.OPENROUTER_API_KEY || github.token }}
+          model: ${{ vars.PM_AI_MODEL != '' && vars.PM_AI_MODEL || (secrets.OPENROUTER_API_KEY != '' && 'google/gemma-4-31b-it:free' || 'openai/gpt-4o-mini') }}
+          max-tokens: 400
+          system-prompt-file: /tmp/pm-system.md
+          prompt-file: /tmp/pm-prompt.txt
+
+      - name: Post advice
+        if: steps.gate.outputs.should_run == 'true' && steps.ai.outcome == 'success' && steps.ai.outputs.response != ''
+        uses: actions/github-script@v9
+        env:
+          AI_RESPONSE: ${{ steps.ai.outputs.response }}
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+          SIZE_FIELD_ID: ${{ steps.pm.outputs.size-field-id }}
+          ITEM_ID: ${{ steps.gate.outputs.item_id }}
+        with:
+          script: |
+            const MARKER = '<!-- pm:ai-size-advice -->';
+            const raw = (process.env.AI_RESPONSE || '').trim();
+            if (!raw) return;
+
+            const size = (raw.match(/^SIZE:\s*(XS|S|M|L|XL)\s*$/im) || [])[1];
+            const why = (raw.match(/^WHY:\s*(.+)$/im) || [])[1];
+            if (!size) {
+              core.info('Model reply did not parse, posting nothing');
+              return;
+            }
+
+            let breakdown = '';
+            const bIdx = raw.toUpperCase().indexOf('BREAKDOWN:');
+            if (size === 'XL' && bIdx !== -1) {
+              const lines = raw.slice(bIdx + 'BREAKDOWN:'.length)
+                .split('\n')
+                .map((l) => l.trim())
+                .filter((l) => l.startsWith('- '))
+                .slice(0, 5);
+              if (lines.length > 0) {
+                breakdown = [
+                  '',
+                  '> Suggested split into sub-issues:',
+                  ...lines.map((l) => `> ${l}`),
+                  '>',
+                  '> Create these with **Create sub-issue** in the sidebar. XL cannot enter Ready until at least 2 exist.',
+                ].join('\n');
+              }
+            }
+
+            let applied = false;
+            const projectId = process.env.PROJECT_ID;
+            const fieldId = process.env.SIZE_FIELD_ID;
+            const itemId = process.env.ITEM_ID;
+            if (projectId && fieldId && itemId) {
+              const q = `
+                query($projectId: ID!) {
+                  node(id: $projectId) {
+                    ... on ProjectV2 {
+                      field(name: "Size") {
+                        ... on ProjectV2SingleSelectField { options { id name } }
+                      }
+                    }
+                  }
+                }`;
+              try {
+                const f = await github.graphql(q, { projectId });
+                const opts = (f.node && f.node.field && f.node.field.options) || [];
+                const opt = opts.find((o) => o.name.trim().toUpperCase() === size);
+                if (opt) {
+                  await github.graphql(`
+                    mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                      updateProjectV2ItemFieldValue(input: {
+                        projectId: $projectId, itemId: $itemId,
+                        fieldId: $fieldId, value: { singleSelectOptionId: $optionId }
+                      }) { projectV2Item { id } }
+                    }`, { projectId, itemId, fieldId, optionId: opt.id });
+                  applied = true;
+                  core.info(`Set Size to ${size}`);
+                }
+              } catch (e) {
+                core.info(`Could not set Size (${e.message}), commenting only`);
+              }
+            }
+
+            const body = [
+              applied
+                ? `> 🤖 **Size set to ${size}**`
+                : `> 🤖 **Suggested size: ${size}**`,
+              why ? `>\n> ${why}` : '',
+              breakdown,
+              '>',
+              applied
+                ? '> Set automatically because the field was empty. Change it on the board if this is wrong.'
+                : '> This is a suggestion. Set **Size** on the board yourself.',
+              MARKER,
+            ].filter(Boolean).join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body,
+            });
+            core.info(`Posted size advice: ${size}`);

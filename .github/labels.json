@@ -1,0 +1,132 @@
+[
+  {
+    "name": "P0: critical",
+    "color": "d73a4a",
+    "description": "Production down / data loss / security breach"
+  },
+  {
+    "name": "P1: high",
+    "color": "e4831a",
+    "description": "Significant impact, must be in current flow"
+  },
+  {
+    "name": "P2: medium",
+    "color": "fbca04",
+    "description": "Important but not urgent, normal backlog"
+  },
+  {
+    "name": "P3: low",
+    "color": "0075ca",
+    "description": "Nice to have, address when capacity allows"
+  },
+  {
+    "name": "docs: bypassed",
+    "color": "f97316",
+    "description": "Doc gate explicitly bypassed with a reason"
+  },
+  {
+    "name": "docs: missing",
+    "color": "e11d48",
+    "description": "Documentation section is empty \u2014 required before Ready"
+  },
+  {
+    "name": "docs: verified",
+    "color": "16a34a",
+    "description": "Docs judged present and real for this change"
+  },
+  {
+    "name": "needs: refinement",
+    "color": "f59e0b",
+    "description": "Ticket is not actionable yet, a proposal is on the thread"
+  },
+  {
+    "name": "size: L",
+    "color": "f0ad4e",
+    "description": "3-5 days"
+  },
+  {
+    "name": "size: M",
+    "color": "5cb85c",
+    "description": "1-2 days"
+  },
+  {
+    "name": "size: S",
+    "color": "9be9a8",
+    "description": "Half day"
+  },
+  {
+    "name": "size: XL",
+    "color": "d9534f",
+    "description": "> 5 days - should be broken down"
+  },
+  {
+    "name": "size: XS",
+    "color": "c2e0c6",
+    "description": "< 1 hour"
+  },
+  {
+    "name": "status: blocked",
+    "color": "b60205",
+    "description": "Cannot proceed - dependency or decision needed"
+  },
+  {
+    "name": "status: needs-review",
+    "color": "0e8a16",
+    "description": "Work done, awaiting review"
+  },
+  {
+    "name": "status: stale",
+    "color": "cfd3d7",
+    "description": "No activity for the stale window, closes unless someone acts"
+  },
+  {
+    "name": "status: wontfix",
+    "color": "eeeeee",
+    "description": "Acknowledged, not addressing"
+  },
+  {
+    "name": "triage: needs-rescope",
+    "color": "d4a72c",
+    "description": "Intent still matters, the issue as written is too vague or too large"
+  },
+  {
+    "name": "triage: recommend-close",
+    "color": "9ca3af",
+    "description": "Work looks done or superseded, a human decides"
+  },
+  {
+    "name": "triage: still-relevant",
+    "color": "2da44e",
+    "description": "Reviewed against the repository, the work still needs doing"
+  },
+  {
+    "name": "type: bug",
+    "color": "d73a4a",
+    "description": "Something is broken"
+  },
+  {
+    "name": "type: chore",
+    "color": "e4e669",
+    "description": "Maintenance, refactor, upgrade"
+  },
+  {
+    "name": "type: epic",
+    "color": "5319e7",
+    "description": "Top-level initiative"
+  },
+  {
+    "name": "type: feature",
+    "color": "1d76db",
+    "description": "New functionality"
+  },
+  {
+    "name": "type: question",
+    "color": "cc317c",
+    "description": "Needs clarification before work begins"
+  },
+  {
+    "name": "type: sub-task",
+    "color": "bfd4f2",
+    "description": "Child of a parent issue"
+  }
+]

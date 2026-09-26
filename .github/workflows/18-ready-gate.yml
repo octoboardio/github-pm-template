@@ -1,0 +1,112 @@
+name: 🚦 Ready Gate
+
+on:
+  issues:
+    types: [opened, edited, labeled, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  gate:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Check Size, Priority and Target date
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const q = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    projectItems(first: 20) {
+                      nodes {
+                        project { id }
+                        status: fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                        size: fieldValueByName(name: "Size") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                        priority: fieldValueByName(name: "Priority") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                        target: fieldValueByName(name: "Target date") {
+                          ... on ProjectV2ItemFieldDateValue { date }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+            const number = context.payload.issue.number;
+            const res = await github.graphql(q, {
+              owner: context.repo.owner, repo: context.repo.repo, number,
+            });
+            const item = res.repository.issue.projectItems.nodes
+              .find((i) => i.project.id === process.env.PROJECT_ID);
+            if (!item) return;
+
+            const { canonical, flow } = require('./.github/scripts/board-vocab.js');
+            if (canonical(item.status && item.status.name) !== flow().committed) return;
+
+            const set = (v) => typeof v === 'string' && v.trim() !== '';
+            const missing = [];
+            if (!set(item.size && item.size.name)) missing.push('Size');
+
+            // Priority lives in two places. On six boards in this org the
+            // Priority field is GitHub's built in one, which the API refuses to
+            // write, so it can never hold a value. 01-auto-triage always applies
+            // a priority label, so accept either source.
+            const labels = (context.payload.issue.labels || [])
+              .map((l) => (l && l.name ? l.name : l));
+            const hasPriorityLabel = labels.some((l) => /^P[0-3]:/i.test(String(l)));
+            if (!set(item.priority && item.priority.name) && !hasPriorityLabel) {
+              missing.push('Priority');
+            }
+
+            // Ready means committed. A commitment with no date is not one, and
+            // this is the moment to ask: at creation nobody knows, so a date
+            // demanded there is a date somebody invents to get past the form.
+            const target = item.target && item.target.date;
+            if (!set(target)) missing.push('Target date');
+
+            if (missing.length === 0) {
+              // Committing to a date that has already gone is not a commitment
+              // either, but it is a different mistake and worth saying plainly
+              // rather than refusing.
+              if (target < new Date().toISOString().slice(0, 10)) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo, issue_number: number,
+                  body: `> ⚠️ **Ready, but the Target date ${target} has already passed.**\n>\n> Move it, or say on the thread why it stands.`,
+                });
+                core.info(`#${number} is Ready with a Target date in the past`);
+                return;
+              }
+              core.info(`#${number} is Ready and complete`);
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: number,
+              body: [
+                `> ⛔ **Not ready**, missing **${missing.join('** and **')}**.`,
+                '>',
+                '> Set the field(s) on the board, then move this back to Ready.\n> Priority may instead be set with a `P0:` to `P3:` label.',
+                '> Sizes: XS under 1h, S half a day, M 1 to 2 days, L 3 to 5 days, XL over 5 days (must be split).',
+                '> Target date is what we are committing to; it is the difference between Ready and a wish.',
+              ].join('\n'),
+            });
+            core.info(`#${number} blocked from Ready, missing ${missing.join(', ')}`);

@@ -1,0 +1,34 @@
+# CODEOWNERS example. Every line below is commented out.
+#
+# Replace @your-org/maintainers with a real team (or user) in your
+# organization, then uncomment the lines you want. GitHub requests a review
+# from the listed owner when a pull request touches a matching path, and
+# branch protection can require that review before merge.
+#
+# Docs: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global: all files need a review from the maintainers team
+# *                           @your-org/maintainers
+
+# Kubernetes / Helm configs
+# *.yaml                      @your-org/maintainers
+# *.yml                       @your-org/maintainers
+# k8s/                        @your-org/maintainers
+# helm/                       @your-org/maintainers
+
+# Terraform / OpenTofu
+# *.tf                        @your-org/maintainers
+# *.tfvars                    @your-org/maintainers
+# infra/                      @your-org/maintainers
+
+# CI/CD workflows
+# .github/workflows/          @your-org/maintainers
+# .github/actions/            @your-org/maintainers
+
+# Dockerfiles
+# Dockerfile*                 @your-org/maintainers
+# docker-compose*.yml         @your-org/maintainers
+
+# Security-sensitive files
+# *.pem                       @your-org/maintainers
+# *.crt                       @your-org/maintainers

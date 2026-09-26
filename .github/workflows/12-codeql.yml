@@ -1,0 +1,105 @@
+name: 🔐 CodeQL Security Scan
+
+# CodeQL supports: Go, Python, JavaScript/TypeScript (common in DevOps tooling)
+# For IaC security (.tf, .hcl, Dockerfile, YAML) — see 14-iac-scan.yml
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**/*.go'
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.go'
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.ts'
+  schedule:
+    - cron: '0 3 * * 1'   # Weekly Monday 3am UTC
+
+permissions:
+  contents: read
+  security-events: write
+  # codeql-action/init reads the workflow run to cache its overlay-base
+  # database. A permissions block sets every unlisted scope to none, so
+  # without this the run dies on "Resource not accessible by integration".
+  actions: read
+
+jobs:
+  detect:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+      any: ${{ steps.detect.outputs.any }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: detect
+        shell: bash
+        env:
+          # Read through the environment rather than interpolated into the
+          # script, so a variable's value can never become shell.
+          PRIVATE: ${{ github.event.repository.private }}
+          CODEQL: ${{ vars.PM_CODEQL }}
+        run: |
+          # Code scanning on a private repository needs GitHub Code Security,
+          # which is licensed per committer. Without it the run reaches the
+          # upload and dies on "Code Security must be enabled for this
+          # repository", leaving a red check on every pull request for
+          # something the repository cannot do anything about. Skip instead,
+          # and let a repository that does hold the licence opt back in.
+          if [ "$PRIVATE" = "true" ] && [ "$CODEQL" != "on" ]; then
+            echo "languages=[]" >> "$GITHUB_OUTPUT"
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "Private repository without GitHub Code Security, so code" \
+                 "scanning cannot upload results. Set the PM_CODEQL variable" \
+                 "to 'on' where that licence exists."
+            exit 0
+          fi
+
+          langs=()
+          add() { case " ${langs[*]} " in *" $1 "*) ;; *) langs+=("$1") ;; esac; }
+          while IFS= read -r f; do
+            case "$f" in
+              node_modules/*|*/node_modules/*|vendor/*|*/vendor/*|.terraform/*|*/.terraform/*) continue ;;
+            esac
+            case "$f" in
+              *.go) add go ;;
+              *.py) add python ;;
+              *.js|*.jsx|*.ts|*.tsx) add javascript ;;
+              *.java) add java ;;
+              *.rb) add ruby ;;
+              *.cs) add csharp ;;
+            esac
+          done < <(git ls-files)
+          if [ ${#langs[@]} -eq 0 ]; then
+            echo "languages=[]" >> "$GITHUB_OUTPUT"
+            echo "any=false" >> "$GITHUB_OUTPUT"
+            echo "No CodeQL supported languages found."
+          else
+            printf -v joined '"%s",' "${langs[@]}"
+            echo "languages=[${joined%,}]" >> "$GITHUB_OUTPUT"
+            echo "any=true" >> "$GITHUB_OUTPUT"
+            echo "CodeQL languages: ${langs[*]}"
+          fi
+
+  analyze:
+    needs: detect
+    if: needs.detect.outputs.any == 'true'
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ${{ fromJSON(needs.detect.outputs.languages) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/autobuild@v4
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -1,0 +1,89 @@
+name: 🕒 Mark In Progress
+
+on:
+  issues:
+    types: [assigned, labeled, edited, reopened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  mark:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Stamp in-progress marker
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const number = context.payload.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const q = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  issue(number: $number) {
+                    projectItems(first: 20) {
+                      nodes {
+                        project { id }
+                        id
+                        status: fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                        size: fieldValueByName(name: "Size") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+            const res = await github.graphql(q, { owner, repo, number });
+            const item = res.repository.issue.projectItems.nodes
+              .find((i) => i.project.id === process.env.PROJECT_ID);
+            if (!item) return;
+
+            const { canonical, flow } = require('./.github/scripts/board-vocab.js');
+            const s = canonical(item.status && item.status.name);
+            if (s !== flow().start) return;
+
+            // Stamp the dates before the size check below returns: how long
+            // work has been in progress does not depend on it being sized.
+            const { stampStatus } = require('./.github/scripts/stamp-status.js');
+            const stamped = await stampStatus({
+              github, core, projectId: process.env.PROJECT_ID,
+              itemId: item.id, status: s, startStatus: flow().start,
+            });
+            if (stamped.length) core.info(`#${number} stamped ${stamped.join(' and ')}`);
+
+            const size = item.size && item.size.name;
+            if (!size) return;
+
+            const comments = await github.rest.issues.listComments({
+              owner, repo, issue_number: number, per_page: 100,
+            });
+            const RE = /<!--\s*pm:in-progress-since=(\S+)\s+size=(\S+)\s*-->/;
+            let current = null;
+            for (const c of comments.data) {
+              const m = (c.body || '').match(RE);
+              if (m) current = m[2];
+            }
+            if (current === size) { core.info(`#${number} already stamped at size ${size}`); return; }
+
+            await github.rest.issues.createComment({
+              owner, repo, issue_number: number,
+              body: `<!-- pm:in-progress-since=${new Date().toISOString()} size=${size} -->`,
+            });
+            core.info(`#${number} stamped in progress at size ${size}`);

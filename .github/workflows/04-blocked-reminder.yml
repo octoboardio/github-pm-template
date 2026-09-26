@@ -1,0 +1,53 @@
+name: 🚧 Blocked Issue Reminder
+
+on:
+  schedule:
+    - cron: '0 9 * * 1-5'  # 9am UTC, Mon–Fri
+  workflow_dispatch:
+
+jobs:
+  blocked-reminder:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    permissions:
+      issues: write
+    steps:
+      - name: Find and comment on stale blocked issues
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'status: blocked',
+              state: 'open',
+              per_page: 50,
+            });
+
+            for (const issue of issues) {
+              const updatedAt = new Date(issue.updated_at);
+              if (updatedAt > twoDaysAgo) continue; // Updated recently, skip
+
+              const daysSince = Math.floor((Date.now() - updatedAt) / (24 * 60 * 60 * 1000));
+              const assignees = issue.assignees.map(a => `@${a.login}`).join(', ') || '_unassigned_';
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: [
+                  `> 🚧 **Blocked Reminder** — this issue has been blocked for **${daysSince} days**`,
+                  `>`,
+                  `> **Assignee(s):** ${assignees}`,
+                  `>`,
+                  `> Please update this issue with:`,
+                  `> - What is blocking it`,
+                  `> - Who/what can unblock it`,
+                  `> - Expected unblock date`,
+                  `>`,
+                  `> If this is no longer blocked, remove the \`status: blocked\` label.`,
+                ].join('\n'),
+              });
+              core.info(`Pinged blocked issue #${issue.number} (blocked ${daysSince}d)`);
+            }

@@ -1,0 +1,95 @@
+name: ✅ PR Quality Gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+jobs:
+  quality-gate:
+    # Skip Dependabot PRs — they follow their own convention
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      - name: Check PR standards
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const title = pr.title;
+            const body  = pr.body || '';
+            const errors = [];
+            const warnings = [];
+
+            // 1. Title must follow conventional commits
+            const titlePattern = /^(feat|fix|chore|docs|refactor|test|ci|perf|revert)(\(.+\))?!?:\s.+/;
+            if (!titlePattern.test(title)) {
+              errors.push('❌ **Title** must follow Conventional Commits: `feat: ...`, `fix: ...`, `chore: ...`');
+            }
+
+            // 2. PR body must contain a Closes/Fixes/Resolves reference.
+            //    The template sync branch is exempt: it is opened by
+            //    tools/fanout.py and tracked by an issue in the template
+            //    repository rather than in the destination.
+            const isExemptBranch = pr.head.ref === 'chore/adopt-pm-template';
+            const hasLinkedIssue = /(?:closes?|fixes?|resolves?)\s+#\d+/i.test(body);
+            if (!hasLinkedIssue && !isExemptBranch) {
+              errors.push('❌ **No linked issue**: add `Closes #N` in the PR description');
+            }
+
+            // 3. PR body must have a Summary section
+            if (!body.includes('## Summary') && !body.includes('## What')) {
+              warnings.push('⚠️ **Missing Summary** — add a `## Summary` section describing what this PR does');
+            }
+
+            // 4. Warn on large PRs (> 500 lines)
+            const changes = (pr.additions || 0) + (pr.deletions || 0);
+            if (changes > 500) {
+              warnings.push(`⚠️ **Large PR** (${changes} lines changed) — consider breaking it into smaller PRs`);
+            }
+
+            // 5. Branch naming convention: `feat/42-short-slug`.
+            const branchPattern = /^(feat|fix|chore|docs|refactor|ci)\/\d+-[\w-]+$/;
+            if (!branchPattern.test(pr.head.ref) && !isExemptBranch) {
+              warnings.push(`⚠️ **Branch name** \`${pr.head.ref}\` should follow \`feat/42-short-slug\``);
+            }
+
+            if (errors.length > 0 || warnings.length > 0) {
+              const sections = [];
+              if (errors.length)   sections.push('### Errors (must fix)\n' + errors.join('\n'));
+              if (warnings.length) sections.push('### Warnings (should fix)\n' + warnings.join('\n'));
+
+              const body_comment = [
+                '## 🔍 PR Quality Gate',
+                '',
+                ...sections,
+                '',
+                errors.length === 0
+                  ? '> ✅ No blocking errors — good to review!'
+                  : '> ⛔ Fix the errors above before requesting review.',
+              ].join('\n');
+
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: pr.number,
+              });
+              const existing = comments.data.find(c =>
+                c.user.type === 'Bot' && c.body.includes('PR Quality Gate')
+              );
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  comment_id: existing.id, body: body_comment,
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner, repo: context.repo.repo,
+                  issue_number: pr.number, body: body_comment,
+                });
+              }
+            }
+
+            if (errors.length > 0) {
+              core.setFailed(`PR Quality Gate failed: ${errors.length} error(s)`);
+            }

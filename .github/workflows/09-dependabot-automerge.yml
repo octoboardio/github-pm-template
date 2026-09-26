@@ -1,0 +1,52 @@
+name: 🤖 Dependabot Auto-merge
+
+on: pull_request
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    if: github.actor == 'dependabot[bot]'
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Auto-approve patch and minor updates
+        # Requires DEPENDABOT_TOKEN secret (PAT with repo + pull_request scope)
+        # or enable "Allow GitHub Actions to approve PRs" in org settings
+        if: |
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr review --approve "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.DEPENDABOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Auto-merge patch and minor updates
+        if: |
+          steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+          steps.meta.outputs.update-type == 'version-update:semver-minor'
+        run: gh pr merge --auto --squash "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.DEPENDABOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Flag major updates for human review
+        if: steps.meta.outputs.update-type == 'version-update:semver-major'
+        run: |
+          gh pr comment "$PR_URL" --body "> ⚠️ **Major version update** — requires manual review before merging.
+          >
+          > **Updated:** \`${{ steps.meta.outputs.dependency-names }}\`
+          > **From:** v\`${{ steps.meta.outputs.previous-version }}\` → v\`${{ steps.meta.outputs.new-version }}\`
+          >
+          > Review the changelog and merge manually when ready."
+          gh pr edit "$PR_URL" --add-label "P1: high"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,63 @@
+name: 🤖 Claude Size Agent
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  id-token: write
+  issues: write
+  contents: read
+
+jobs:
+  size:
+    if: vars.PM_AI_ENABLED != 'false' && vars.PM_AI_PROVIDER == 'claude'
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    env:
+      CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: gate
+        name: Skip when already advised or already sized
+        if: env.CLAUDE_TOKEN != ''
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const MARKER = '<!-- pm:ai-size-advice -->';
+            const c = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              per_page: 100,
+            });
+            const done = c.data.some((x) => (x.body || '').includes(MARKER));
+            core.setOutput('should_run', done ? 'false' : 'true');
+            if (done) core.info('Advice already posted, skipping');
+
+      - name: Run Claude size agent
+        if: env.CLAUDE_TOKEN != '' && steps.gate.outputs.should_run == 'true'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          use_sticky_comment: true
+          prompt: |
+            Read the agent definition at .github/agents/size-assist.agent.md and
+            follow it exactly. Ignore its YAML frontmatter.
+
+            Size issue number ${{ github.event.issue.number }} in this repository.
+            Read the repository to judge how much work the change actually is.
+
+            Post one comment on that issue containing your reply in the format the
+            agent definition specifies, followed on its own line by the exact
+            marker text: <!-- pm:ai-size-advice -->
+
+            You may set the Size field on this issue's project board item, but
+            ONLY if it is currently empty. If any size is already set, leave it
+            exactly as it is and say so in your comment. Never overwrite a size
+            a person chose.
+
+            You still must not: close any issue or pull request, edit any issue
+            title or body, modify any file, or open a pull request.

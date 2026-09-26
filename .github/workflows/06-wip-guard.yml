@@ -1,0 +1,69 @@
+name: 🚦 WIP Limit Guard
+
+on:
+  issues:
+    types: [assigned]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  guard:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Check WIP limit
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const WIP_LIMIT = 2;
+            const assignee = context.payload.assignee && context.payload.assignee.login;
+            if (!assignee) return;
+
+            const q = `
+              query($projectId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 100) {
+                      nodes {
+                        content { ... on Issue { number state assignees(first: 5) { nodes { login } } } }
+                        status: fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+            const res = await github.graphql(q, { projectId: process.env.PROJECT_ID });
+            const { canonical, flow } = require('./.github/scripts/board-vocab.js');
+            // Anything the standard calls active counts against the limit, not
+            // one hand-spelled column.
+            const inProgress = (n) => flow().active.includes(canonical(n));
+            const count = res.node.items.nodes.filter((i) =>
+              i.content && i.content.state === 'OPEN' &&
+              inProgress(i.status && i.status.name) &&
+              i.content.assignees.nodes.some((a) => a.login === assignee)
+            ).length;
+
+            if (count <= WIP_LIMIT) {
+              core.info(`${assignee} has ${count} in flight, within limit ${WIP_LIMIT}`);
+              return;
+            }
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: `> 🚦 **WIP limit**, @${assignee} now has **${count}** items in flight (limit ${WIP_LIMIT}).\n>\n> Finish or hand off something before starting this.`,
+            });

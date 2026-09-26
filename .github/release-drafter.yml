@@ -1,0 +1,36 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+# Auto-bump version based on labels
+version-resolver:
+  major:
+    labels: ['breaking change']
+  minor:
+    labels: ['type: feature']
+  patch:
+    labels: ['type: bug', 'type: chore']
+  default: patch
+
+# Changelog sections grouped by label
+categories:
+  - title: '🚀 Features'
+    labels: ['type: feature']
+  - title: '🐛 Bug Fixes'
+    labels: ['type: bug']
+  - title: '🔧 Maintenance'
+    labels: ['type: chore']
+  - title: '🔒 Security'
+    labels: ['security']
+
+# Exclude chores from release notes (keep changelog clean)
+exclude-labels: ['type: sub-task', 'status: wontfix', 'status: stale']
+
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+change-title-escapes: '\<*_&'
+
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  **Full Changelog**: $PREVIOUS_TAG...v$RESOLVED_VERSION

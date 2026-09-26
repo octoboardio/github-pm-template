@@ -1,0 +1,94 @@
+name: ⏱ Size Drift
+
+on:
+  schedule:
+    - cron: '0 7 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Nudge overrunning issues
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const BUDGET_HOURS = { XS: 1, S: 4, M: 16, L: 40 };
+            const RE = /<!--\s*pm:in-progress-since=(\S+)\s+size=(\S+)\s*-->/;
+            const NUDGED = '<!-- pm:size-drift-nudged';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const now = Date.now();
+
+            const q = `
+              query($projectId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 100) {
+                      nodes {
+                        content { ... on Issue { number state } }
+                        status: fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+            const { canonical, flow } = require('./.github/scripts/board-vocab.js');
+            const res = await github.graphql(q, { projectId: process.env.PROJECT_ID });
+
+            for (const item of res.node.items.nodes) {
+              if (!item.content || item.content.state !== 'OPEN') continue;
+              const s = canonical(item.status && item.status.name);
+              if (s !== flow().start) continue;
+
+              const number = item.content.number;
+              const comments = await github.rest.issues.listComments({
+                owner, repo, issue_number: number, per_page: 100,
+              });
+
+              let marker = null;
+              for (const c of comments.data) {
+                const m = (c.body || '').match(RE);
+                if (m) marker = { since: new Date(m[1]), size: m[2] };
+              }
+              if (!marker) continue;
+
+              const budget = BUDGET_HOURS[marker.size];
+              if (budget == null) continue;
+
+              const hours = (now - marker.since.getTime()) / 3600000;
+              if (hours <= budget) continue;
+
+              const already = comments.data.some((c) =>
+                (c.body || '').includes(`${NUDGED} size=${marker.size}`));
+              if (already) continue;
+
+              const days = (hours / 24).toFixed(1);
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: number,
+                body: [
+                  `> ⏱ **Size drift**, sized **${marker.size}** (budget ${budget}h) but in progress for **${days} days**.`,
+                  '>',
+                  '> Re-size it, or split the remaining work into a new issue. This is a nudge, not a block.',
+                  `${NUDGED} size=${marker.size} -->`,
+                ].join('\n'),
+              });
+              core.info(`Nudged #${number}, ${marker.size} at ${days} days`);
+            }

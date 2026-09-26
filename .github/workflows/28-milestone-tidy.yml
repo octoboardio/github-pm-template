@@ -1,0 +1,68 @@
+name: 📅 Milestone Tidy
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  issues: write
+  contents: read
+
+jobs:
+  tidy:
+    if: vars.PM_AI_ENABLED != 'false' && vars.PM_AI_PROVIDER == 'claude'
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    env:
+      CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: count
+        name: Count open milestones
+        if: env.CLAUDE_TOKEN != ''
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const ms = await github.paginate(github.rest.issues.listMilestones, {
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', per_page: 100,
+            });
+            core.setOutput('count', String(ms.length));
+            core.info(`${ms.length} open milestone(s)`);
+
+      - name: Run milestone tidy agent
+        if: env.CLAUDE_TOKEN != '' && steps.count.outputs.count != '0'
+        uses: anthropics/claude-code-action@v1
+        continue-on-error: true
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          use_sticky_comment: true
+          github_token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read the agent definition at .github/agents/milestone-tidy.agent.md
+            and follow it exactly. Ignore its YAML frontmatter.
+
+            List every open milestone in this repository along with how many
+            open issues each contains, then review them.
+
+            Post ONE comment containing your full review to the issue titled
+            "📅 Milestone review", creating that issue if it does not exist.
+            End the comment with the exact marker text on its own line:
+            <!-- pm:milestone-tidy -->
+
+            You may close a milestone ONLY when it currently contains zero open
+            issues. Report each one you close in your summary. If a milestone
+            has even one open issue you must not close it, whatever your
+            verdict, because closing it would hide that work from views people
+            rely on.
+
+            You still must not: delete any milestone, close any issue, edit any
+            issue, modify any file, or open a pull request.
+
+      - name: Nothing to review
+        if: env.CLAUDE_TOKEN != '' && steps.count.outputs.count == '0'
+        run: echo "No open milestones. Nothing to do."
+
+      - name: Report when token missing
+        if: env.CLAUDE_TOKEN == ''
+        run: echo "CLAUDE_CODE_OAUTH_TOKEN is not set. Skipping."

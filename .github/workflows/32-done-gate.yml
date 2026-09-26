@@ -1,0 +1,43 @@
+name: 📗 Done Gate
+
+# 08-docs-gate asks at creation whether the Documentation section is filled in.
+# Prose satisfies it, and nobody can answer it properly before the work exists.
+# This asks at the only moment the answer can be true: on close. Undocumented
+# work is not delivered, so it does not get to sit in the done column and be
+# counted as throughput by 31-flow-report.
+#
+# The work is in .github/scripts/done-gate.js.
+
+on:
+  issues:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  gate:
+    # PM_DOCS_LINK=off for a repository where this does not apply, a sandbox or
+    # one whose documentation lives somewhere this cannot see.
+    if: ${{ vars.PM_DOCS_LINK != 'off' }}
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Require a documentation link
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+          STATUS_FIELD_ID: ${{ steps.pm.outputs.status-field-id }}
+          STATUS_OPTIONS: ${{ steps.pm.outputs.status-options }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const gate = require('./.github/scripts/done-gate.js');
+            await gate({ github, context, core });

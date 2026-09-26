@@ -1,0 +1,69 @@
+name: Chore
+description: Refactor, upgrade, maintenance task
+labels: ["type: chore", "P3: low", "docs: missing"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What
+      description: What needs to be done
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: Why now — tech debt, security, performance
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      value: "- [ ] "
+    validations:
+      required: true
+
+  - type: input
+    id: doc-link
+    attributes:
+      label: Doc Link
+      description: Link to the changelog, ADR or migration note
+      placeholder: "https://docs.example.com/changelog/change-name"
+
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Documentation
+      description: "Changelog entry, migration note, or /bypass-docs: <reason> as a comment."
+      placeholder: "What changelog entries or migration notes are needed?"
+
+  - type: input
+    id: client-ticket
+    attributes:
+      label: Client Ticket
+      placeholder: "INFRA-123"
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "P0: Critical"
+        - "P1: High"
+        - "P2: Medium"
+        - "P3: Low"
+      default: 3
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      options: [XS, S, M, L, XL]
+      default: 1
+    validations:
+      required: true

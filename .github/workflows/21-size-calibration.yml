@@ -1,0 +1,120 @@
+name: 📐 Size Calibration
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  calibrate:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Build calibration report
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const TITLE = '📐 Size calibration';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const since = Date.now() - 7 * 86400000;
+
+            const bucket = (add, del) => {
+              const n = (add || 0) + (del || 0);
+              if (n <= 10) return 'XS';
+              if (n <= 100) return 'S';
+              if (n <= 300) return 'M';
+              if (n <= 1000) return 'L';
+              return 'XL';
+            };
+
+            const prs = await github.rest.pulls.list({
+              owner, repo, state: 'closed', sort: 'updated', direction: 'desc', per_page: 100,
+            });
+
+            const rows = [];
+            for (const pr of prs.data) {
+              if (!pr.merged_at || new Date(pr.merged_at).getTime() < since) continue;
+              const m = (pr.body || '').match(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i);
+              if (!m) continue;
+              const number = Number(m[1]);
+
+              const q = `
+                query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    issue(number: $number) {
+                      projectItems(first: 20) {
+                        nodes {
+                          project { id }
+                          size: fieldValueByName(name: "Size") {
+                            ... on ProjectV2ItemFieldSingleSelectValue { name }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }`;
+              let estimated = null;
+              try {
+                const res = await github.graphql(q, { owner, repo, number });
+                const item = res.repository.issue.projectItems.nodes
+                  .find((i) => i.project.id === process.env.PROJECT_ID);
+                estimated = item && item.size && item.size.name;
+              } catch (e) {
+                core.info(`Skipping #${number}: ${e.message}`);
+              }
+              if (!estimated) continue;
+
+              const full = await github.rest.pulls.get({ owner, repo, pull_number: pr.number });
+              rows.push({
+                number: pr.number,
+                estimated,
+                actual: bucket(full.data.additions, full.data.deletions),
+              });
+            }
+
+            let body;
+            if (rows.length === 0) {
+              body = `## ${TITLE}\n\n_No sized tickets merged in the last 7 days._`;
+            } else {
+              const hits = rows.filter((r) => r.estimated === r.actual).length;
+              const pct = Math.round((hits / rows.length) * 100);
+              body = [
+                `## ${TITLE}, last 7 days`,
+                '',
+                `**${hits} of ${rows.length} (${pct}%)** merged tickets shipped at their estimated size.`,
+                '',
+                '| PR | Estimated | Actual (diff) |',
+                '|---|---|---|',
+                ...rows.map((r) => `| #${r.number} | ${r.estimated} | ${r.actual}${r.estimated === r.actual ? '' : ' ⚠️'} |`),
+              ].join('\n');
+            }
+
+            const found = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${owner}/${repo} is:issue is:open in:title "${TITLE}"`,
+            });
+            if (found.data.total_count > 0) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: found.data.items[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner, repo, title: TITLE, body, labels: ['type: chore'],
+              });
+            }
+            core.info(body);

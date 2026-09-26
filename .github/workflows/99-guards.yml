@@ -1,0 +1,149 @@
+name: ✅ Template Guards
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guards:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Lint workflows
+        uses: raven-actions/actionlint@v2
+        with:
+          # Only the workflows the template ships. This runs in every adopting
+          # repository, and failing a team's build over how they pinned an
+          # action in their own release workflow is not the template's call:
+          # it already cost five repositories a red build on rollout, for a
+          # release-drafter version nobody here had ever touched.
+          # check-template.py draws the same line and reports the rest.
+          files: .github/workflows/[0-9][0-9]-*.yml
+          # The k3s runner image has neither pipx nor a system shellcheck, and
+          # the action shells out to pipx to fetch them. actionlint's own
+          # workflow checks still run; only the embedded script linters are off.
+          shellcheck: false
+          pyflakes: false
+
+      - name: Unit test the board planner
+        # The option-list planner decides what a single select field becomes.
+        # Sending an option without its id deletes the value on every item that
+        # held it, so this logic is tested rather than reviewed by eye.
+        run: node --test .github/scripts/*.test.js
+
+      - name: Install PyYAML
+        run: pip install --disable-pip-version-check pyyaml
+
+      - name: Check labels, board standard and inline scripts
+        # Catches a label named in a prompt but absent from labels.json, a board
+        # term copied into a script, a syntax error in an inline `script:` block,
+        # and a runner default an adopter cannot reach.
+        run: python3 .github/scripts/check-template.py .
+
+      - name: No hardcoded ProjectsV2 identifiers
+        shell: bash
+        run: |
+          # Scoped to what the template owns: an adopter's own files are not
+          # this check's business, and this workflow names the patterns it
+          # looks for, so it must not scan itself.
+          if grep -rnE 'PVT_|PVTSSF_|PVTF_' --exclude=99-guards.yml \
+               .github/workflows/[0-9][0-9]-*.yml .github/actions .github/agents \
+               .github/scripts .github/labels.json .github/board-standard.json ; then
+            echo "::error::hardcoded ProjectsV2 identifier found"
+            exit 1
+          fi
+          echo "No hardcoded identifiers."
+
+      - name: Every checkout workflow must grant contents read
+        shell: bash
+        run: |
+          # A permissions block sets every unlisted scope to none, so a
+          # workflow that checks out without contents read fails with
+          # "repository not found". Catch that before it ships.
+          bad=0
+          # Only the workflows the template ships. These run in every adopting
+          # repository and must not fail a team's build over their own files.
+          for f in .github/workflows/[0-9][0-9]-*.yml; do
+            # This file names the patterns it looks for, so it skips itself.
+            [ "$(basename "$f")" = "99-guards.yml" ] && continue
+            grep -q 'actions/checkout@' "$f" || continue
+            grep -qE '^permissions:' "$f" || continue
+            grep -qE '^\s*contents:\s*(read|write)' "$f" || {
+              echo "::error file=$f::declares permissions and checks out, but does not grant contents: read"
+              bad=1
+            }
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "All checkout workflows grant contents read."
+
+      - name: Claude workflows must grant id-token write
+        shell: bash
+        run: |
+          # claude-code-action mints its GitHub token over OIDC, so without
+          # id-token: write it fails with "Could not fetch an OIDC token".
+          # continue-on-error hides that as a green run, so guard it here.
+          bad=0
+          # Only the workflows the template ships, for the same reason.
+          for f in .github/workflows/[0-9][0-9]-*.yml; do
+            # This file names the patterns it looks for, so it skips itself.
+            [ "$(basename "$f")" = "99-guards.yml" ] && continue
+            grep -q 'claude-code-action' "$f" || continue
+            grep -qE '^\s*id-token:\s*write' "$f" || {
+              echo "::error file=$f::uses claude-code-action but does not grant id-token: write"
+              bad=1
+            }
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "All Claude workflows grant id-token write."
+
+      - name: No workflow may set track_progress
+        shell: bash
+        run: |
+          # claude-code-action rejects track_progress on workflow_dispatch:
+          # "track_progress is only supported for events: pull_request, issues..."
+          bad=0
+          # Only the workflows the template ships. These run in every adopting
+          # repository and must not fail a team's build over their own files.
+          for f in .github/workflows/[0-9][0-9]-*.yml; do
+            # This file names the patterns it looks for, so it skips itself.
+            [ "$(basename "$f")" = "99-guards.yml" ] && continue
+            grep -q 'track_progress' "$f" || continue
+            echo "::error file=$f::sets track_progress, which posts a separate progress comment and is rejected on workflow_dispatch. Use use_sticky_comment instead."
+            bad=1
+          done
+          [ "$bad" -eq 0 ] || exit 1
+          echo "No workflow sets track_progress."
+
+      - name: Stale workflow must never close
+        shell: bash
+        run: |
+          for k in days-before-issue-close days-before-pr-close; do
+            grep -qE "^\\s*$k:\\s*-1\\s*$" .github/workflows/05-stale.yml || {
+              echo "::error::$k is not -1 in 05-stale.yml, the workflow must never close anything"
+              exit 1
+            }
+          done
+          echo "Stale workflow cannot close anything."
+
+      - name: Exactly one workflow triggers on issue open for labelling
+        shell: bash
+        run: |
+          if [ -f .github/workflows/pm-automation.yml ]; then
+            echo "::error::pm-automation.yml duplicates 01-auto-triage on issues[opened]"
+            exit 1
+          fi
+          echo "No duplicate issue-open labeller."

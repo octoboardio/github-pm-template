@@ -1,0 +1,84 @@
+name: Feature
+description: New functionality or improvement
+labels: ["type: feature", "P2: medium", "docs: missing"]
+body:
+  - type: markdown
+    attributes:
+      value: "## New Feature Request"
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One sentence — what and why
+    validations:
+      required: true
+
+  - type: input
+    id: epic
+    attributes:
+      label: Epic
+      description: Link to parent epic (e.g. #3)
+      placeholder: "#N"
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: What must be true for this to be done?
+      value: "- [ ] \n- [ ] "
+    validations:
+      required: true
+
+  - type: input
+    id: doc-link
+    attributes:
+      label: Doc Link
+      description: Link to the design or reference document for this work
+      placeholder: "https://docs.example.com/features/feature-name"
+
+  - type: textarea
+    id: documentation
+    attributes:
+      label: Documentation
+      description: |
+        REQUIRED — paste the doc link above OR describe what needs documenting.
+        If no docs needed, post a comment: /bypass-docs: <reason>
+      placeholder: "What documentation needs to be created or updated?"
+    validations:
+      required: false
+
+  - type: input
+    id: client-ticket
+    attributes:
+      label: Client Ticket
+      description: External reference (Jira, Linear, a helpdesk, etc.)
+      placeholder: "PROJ-123 | https://your-tracker.example.com/browse/PROJ-123"
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - "P0: Critical"
+        - "P1: High"
+        - "P2: Medium"
+        - "P3: Low"
+      default: 2
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size
+      options: [XS, S, M, L, XL]
+      default: 2
+    validations:
+      required: true
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / Context
+      description: Design decisions, links, screenshots

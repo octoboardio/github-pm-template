@@ -1,0 +1,91 @@
+name: 📊 Daily Board Digest
+
+on:
+  schedule:
+    - cron: '30 8 * * 1-5'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  digest:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Post digest
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const TITLE = '📊 Daily Board Digest';
+            const { canonical: canon, options, flow } = require('./.github/scripts/board-vocab.js');
+
+            const q = `
+              query($projectId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 100) {
+                      nodes {
+                        content { ... on Issue { number title state assignees(first: 3) { nodes { login } } } }
+                        status: fieldValueByName(name: "Status") {
+                          ... on ProjectV2ItemFieldSingleSelectValue { name }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+            const res = await github.graphql(q, { projectId: process.env.PROJECT_ID });
+            const items = res.node.items.nodes
+              .filter((i) => i.content && i.content.state === 'OPEN')
+              .map((i) => ({
+                number: i.content.number,
+                title: i.content.title,
+                who: i.content.assignees.nodes[0] ? i.content.assignees.nodes[0].login : null,
+                col: canon(i.status && i.status.name),
+              }));
+
+            const by = (c) => items.filter((i) => i.col === c);
+            const fmt = (l) => l.length === 0 ? '_none_'
+              : l.map((i) => `- #${i.number} ${i.title}${i.who ? ` (@${i.who})` : ''}`).join('\n');
+
+            // Every column except the one work leaves by, newest state first,
+            // so a column added to the standard shows up here without an edit.
+            const cols = options('Status').filter((c) => c !== flow().done).reverse();
+            const body = [
+              `## ${TITLE}, ${new Date().toISOString().slice(0, 10)}`,
+              '',
+              '| Column | Count |',
+              '|--------|-------|',
+              ...cols.map((c) => `| ${c} | ${by(c).length} |`),
+              '',
+              ...flow().waiting.flatMap((c) => [`### ⏸ ${c}`, fmt(by(c)), '']),
+              `### 🟡 ${flow().start}`, fmt(by(flow().start)),
+            ].join('\n');
+
+            const found = await github.rest.search.issuesAndPullRequests({
+              q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open in:title "${TITLE}"`,
+            });
+            if (found.data.total_count > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: found.data.items[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: TITLE, body, labels: ['type: chore'],
+              });
+            }
+            core.info('Digest posted');

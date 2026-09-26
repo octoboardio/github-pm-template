@@ -1,0 +1,48 @@
+name: 📈 Flow Report
+
+# 21-size-calibration measures how good our estimates were. Nothing measured how
+# work actually moves: how long it sits, how long the client holds it, how long
+# it takes end to end. An item parked in Client Awaiting was invisible to every
+# workflow, which is the worst place to have a blind spot in client work.
+#
+# The work is in .github/scripts/flow-report.js.
+
+on:
+  schedule:
+    # Monday, after 30-sync-board at 04:00 and 29-sync-labels at 05:00, so the
+    # board is already aligned when this reads it.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    # A template repository has no board of its own, and a repository that opted
+    # out of one has nothing to measure.
+    if: ${{ !github.event.repository.is_template && vars.PM_BOARD != 'off' }}
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Report on flow
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const report = require('./.github/scripts/flow-report.js');
+            await report({ github, context, core });
+
+      - name: Report when no board was found
+        if: steps.pm.outputs.found != 'true'
+        run: echo "No board resolved for this repository. Nothing to measure."

@@ -1,0 +1,39 @@
+name: 🏷️ Sync Labels
+
+# Labels are repository settings, not files, so a template sync does not carry
+# them. Without this, a new adopter starts with none of them and every workflow
+# that adds one fails: `gh pr edit --add-label` looks the label up client side
+# and exits 1 with "'P1: high' not found". That is what silently broke
+# 09-dependabot-automerge on every repository in this org.
+#
+# The label set lives in .github/labels.json, which the template owns and syncs.
+# The work is in .github/scripts/sync-labels.js.
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - .github/labels.json
+      - .github/scripts/sync-labels.js
+      - .github/workflows/29-sync-labels.yml
+  schedule:
+    # Weekly, so a label someone deletes by hand comes back on its own.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync-labels:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Apply the label set
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const sync = require('./.github/scripts/sync-labels.js');
+            await sync({ github, context, core });

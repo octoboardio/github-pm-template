@@ -1,0 +1,86 @@
+name: 🎯 Auto Triage
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ${{ vars.PM_RUNNER || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Label from title prefix
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const issue = context.payload.issue;
+            if (issue.labels && issue.labels.length > 0) {
+              core.info('Issue already labelled, leaving as is');
+              return;
+            }
+            const MAP = [
+              { prefix: '[epic]', labels: ['type: epic', 'P1: high'] },
+              { prefix: '[sub]', labels: ['type: sub-task', 'P2: medium'] },
+              { prefix: 'feat:', labels: ['type: feature', 'P2: medium'] },
+              { prefix: 'fix:', labels: ['type: bug', 'P1: high'] },
+              { prefix: 'chore:', labels: ['type: chore', 'P3: low'] },
+            ];
+            const t = issue.title.toLowerCase();
+            const hit = MAP.find((m) => t.startsWith(m.prefix));
+            const labels = hit ? hit.labels : ['type: feature', 'P2: medium'];
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels,
+            });
+            core.info(`Applied labels: ${labels.join(', ')}`);
+
+      - id: pm
+        uses: ./.github/actions/pm-resolve
+        with:
+          token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Add to board
+        if: steps.pm.outputs.found == 'true'
+        uses: actions/github-script@v9
+        env:
+          PROJECT_ID: ${{ steps.pm.outputs.project-id }}
+        with:
+          github-token: ${{ secrets.PROJECT_TOKEN || secrets.GITHUB_TOKEN }}
+          script: |
+            const m = `
+              mutation($projectId: ID!, $contentId: ID!) {
+                addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                  item { id }
+                }
+              }`;
+            const r = await github.graphql(m, {
+              projectId: process.env.PROJECT_ID,
+              contentId: context.payload.issue.node_id,
+            });
+            core.info(`Added to board: ${r.addProjectV2ItemById.item.id}`);
+
+      - name: Post triage checklist
+        uses: actions/github-script@v9
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: [
+                '> 🤖 **Auto-triaged**',
+                '>',
+                '> **Before this can move to Ready:**',
+                '> - [ ] Set **Size** on the board (XS, S, M, L, XL)',
+                '> - [ ] Set **Priority**',
+                '> - [ ] Fill the **Documentation** section',
+                '> - [ ] If XL, split into sub-issues. XL cannot enter Ready.',
+              ].join('\n'),
+            });
